@@ -34,12 +34,12 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      //char *pa = kalloc();
+      //if(pa == 0)
+      //  panic("kalloc");
+      //uint64 va = KSTACK((int) (p - proc));
+      //kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      //p->kstack = va;
   }
   kvminithart();
 }
@@ -127,6 +127,17 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  // Map kernel page table for process
+  kvminit_new(p);
+
+  // Allocate a page for the process's kernel stack.
+  // Map it high in memory, followed by an invalid
+  // guard page.
+  char *pa = kalloc();
+  uint64 va = KSTACK((int) (p - proc));
+  mappages(p->kernel_pagetable, va, PGSIZE, (uint64)pa, PTE_R | PTE_W);
+  p->kstack = va;
+
   return p;
 }
 
@@ -211,6 +222,7 @@ uchar initcode[] = {
 void
 userinit(void)
 {
+  printf("yyy\n");
   struct proc *p;
 
   p = allocproc();
@@ -229,6 +241,9 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
+
+  //vmprint(p->pagetable);
+  //vmprint(p->kernel_pagetable);
 
   release(&p->lock);
 }
@@ -458,7 +473,7 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  
+
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
@@ -473,10 +488,23 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        printf("%d %d %s\n", cpuid(), p->pid, p->name);
+
+        w_satp(MAKE_SATP(p->kernel_pagetable));
+        sfence_vma();
+
+        //printf("%d %d %s\n", cpuid(), p->pid, p->name);
+
         swtch(&c->context, &p->context);
+
+        printf("%d %d %s\n", cpuid(), p->pid, p->name);
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
+        w_satp(MAKE_SATP(kernel_pagetable));
+        sfence_vma();
+
         c->proc = 0;
 
         found = 1;

@@ -1,3 +1,5 @@
+#include "spinlock.h"
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -100,7 +102,10 @@ struct proc {
   pagetable_t pagetable;       // User page table
   struct trapframe *trapframe; // data page for trampoline.S
   struct context context;      // swtch() here to run process
+                               // saved registers for kernel context switch
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  pagetable_t kernel_pagetable;  // Kernel page table
 };

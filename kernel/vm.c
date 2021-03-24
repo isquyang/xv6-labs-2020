@@ -5,6 +5,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -45,6 +46,39 @@ kvminit()
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+}
+
+/*
+ * create kernel page table for per process
+ */
+void
+kvminit_new(struct proc* p)
+{
+    p->kernel_pagetable = (pagetable_t) kalloc();
+    memset(p->kernel_pagetable, 0, PGSIZE);
+
+    // uart registers
+    mappages(p->kernel_pagetable, UART0, PGSIZE, UART0, PTE_R | PTE_W);
+
+    // virtio mmio disk interface
+    mappages(p->kernel_pagetable, VIRTIO0, PGSIZE, VIRTIO0, PTE_R | PTE_W);
+
+    // CLINT
+    mappages(p->kernel_pagetable, CLINT, 0x10000, CLINT, PTE_R | PTE_W);
+
+
+    // PLIC
+    mappages(p->kernel_pagetable, PLIC, 0x400000, PLIC, PTE_R | PTE_W);
+
+    // map kernel text executable and read-only
+    mappages(p->kernel_pagetable, KERNBASE, (uint64)etext-KERNBASE, KERNBASE, PTE_R | PTE_X);
+
+    // map kernel data and the pyhsical RAM we'll make use of
+    mappages(p->kernel_pagetable, (uint64)etext, PHYSTOP-(uint64)etext, (uint64)etext, PTE_R | PTE_W);
+
+    // map the trampoline for trap entry/exit to
+    // the highest virtual address in the kernel
+    mappages(p->kernel_pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline, PTE_R | PTE_X);
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -131,7 +165,7 @@ kvmpa(uint64 va)
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
-  
+
   pte = walk(kernel_pagetable, va, 0);
   if(pte == 0)
     panic("kvmpa");
@@ -341,7 +375,7 @@ void
 uvmclear(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
-  
+
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("uvmclear");
@@ -440,3 +474,44 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+void pteprint(int level, int index,  pte_t pte) {
+    for (int i = 3; i >= level; i--) {
+        if (i != level) {
+            printf(".. ");
+        } else {
+            printf("..");
+        }
+    }
+    printf("%d: ", index);
+    printf("pte %p ", pte);
+    printf("pa %p\n", PTE2PA(pte));
+}
+
+void _vmprint(int level, pagetable_t pagetable) {
+    for (int i = 0; i < 512; i++) {
+
+        pte_t pte = pagetable[i];
+
+        if (pte & PTE_V) {
+
+            pteprint(level, i, pte);
+
+            if (level == 1) {
+                continue;
+            }
+
+            uint64 child = PTE2PA(pte);
+            _vmprint(level-1, (pagetable_t)(child));
+        }
+    }
+}
+
+// Print the contents of a page table
+void
+vmprint(pagetable_t pagetable)
+{
+    return _vmprint(3, pagetable);
+}
+
+
